@@ -51,37 +51,37 @@ class SequenceAnalyzer:
         if len(seq) == 0:
             raise ValueError("Invalid sequence: no valid amino acids found")
             
-        # Initialize Biopython analyzer
         analysis = ProteinAnalysis(seq)
         
-        # Calculate standard metrics via Biopython
         mw = analysis.molecular_weight()
-        gravy = analysis.gravy()  # Grand Average of Hydropathy
+        gravy = analysis.gravy()
         instability = analysis.instability_index()
         charge = analysis.charge_at_pH(7.0)
         
-        # Calculate amino acid composition fractions
-        aa_counts = analysis.get_amino_acids_percent()
-        cys_frac = aa_counts.get('C', 0)
-        pro_frac = aa_counts.get('P', 0)
-        aromatic_frac = aa_counts.get('F', 0) + aa_counts.get('W', 0) + aa_counts.get('Y', 0)
+        # --- THE FIX: Calculate fractions manually to bypass Biopython version changes ---
+        raw_counts = analysis.count_amino_acids()
+        seq_len = len(seq)
         
-        # Secondary structure fractions [helix, turn, sheet]
-        # We use the 'turn' fraction as a proxy for structural disorder
+        # Convert raw integer counts to 0.0 - 1.0 fractions so the AI doesn't break
+        aa_fracs = {aa: count / seq_len for aa, count in raw_counts.items()}
+        
+        cys_frac = aa_fracs.get('C', 0.0)
+        pro_frac = aa_fracs.get('P', 0.0)
+        aromatic_frac = aa_fracs.get('F', 0.0) + aa_fracs.get('W', 0.0) + aa_fracs.get('Y', 0.0)
+        
         sec_struct = analysis.secondary_structure_fraction()
         
-        # Calculate Aliphatic index
-        aliphatic = (aa_counts.get('A', 0) * 100 + 
-                     aa_counts.get('V', 0) * 2.9 * 100 +
-                     aa_counts.get('I', 0) * 3.9 * 100 +
-                     aa_counts.get('L', 0) * 3.9 * 100)
+        aliphatic = (aa_fracs.get('A', 0.0) * 100 + 
+                     aa_fracs.get('V', 0.0) * 2.9 * 100 +
+                     aa_fracs.get('I', 0.0) * 3.9 * 100 +
+                     aa_fracs.get('L', 0.0) * 3.9 * 100)
                      
-        # Calculate custom folding complexity metric
         folding_complexity = (cys_frac * 5 + pro_frac * 2 + 
-                              np.log10(len(seq)) * 0.5 + aromatic_frac * 1.5)
+                              np.log10(seq_len) * 0.5 + aromatic_frac * 1.5)
+        # -------------------------------------------------------------------------------
 
         return SequenceFeatures(
-            length=len(seq),
+            length=seq_len,
             molecular_weight=mw,
             hydrophobicity=gravy,  
             charge_at_ph7=charge,
@@ -91,12 +91,11 @@ class SequenceAnalyzer:
             cysteine_fraction=cys_frac,
             proline_fraction=pro_frac,
             aromatic_fraction=aromatic_frac,
-            disorder_propensity=sec_struct[1], # Using turn fraction as proxy
-            aggregation_propensity=max(0, gravy * 1.5), # Simplified proxy based on GRAVY
-            rare_codon_burden=0.1, # Proxy (requires DNA sequence for precise calculation)
+            disorder_propensity=sec_struct[1], 
+            aggregation_propensity=max(0, gravy * 1.5), 
+            rare_codon_burden=0.1, 
             folding_complexity=folding_complexity
         )
-
 
 class MetabolicBurdenPredictor:
     """
