@@ -142,7 +142,15 @@ if page == "🚀 Mission Control":
         st.subheader("Executive KPI Summary")
         if st.session_state.sim_results:
             res = st.session_state.sim_results
-            yield_kg = (res['optimized_simulation' if run_opt else 'baseline_simulation']['product'][-1] * res['tank_volume']) / 1000
+            
+            # --- BUG FIX: Safely check memory instead of the toggle state ---
+            if 'optimized_simulation' in res:
+                yield_kg = (res['optimized_simulation']['product'][-1] * res['tank_volume']) / 1000
+            elif 'baseline_simulation' in res:
+                yield_kg = (res['baseline_simulation']['product'][-1] * res['tank_volume']) / 1000
+            else:
+                yield_kg = 0.0
+            # ----------------------------------------------------------------
             
             st.markdown(f"""
             <div class="metric-card">
