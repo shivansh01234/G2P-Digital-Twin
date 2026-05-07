@@ -709,10 +709,11 @@ class DynamicTrajectoryOptimizer:
         )
         
         # Initial guess
+        # Initial guess: Aggressive ramp-up to give the AI a high-yield head start
         x0 = np.concatenate([
-            np.linspace(50, 150, n_ctrl),    
-            np.linspace(2000, 6000, n_ctrl), 
-            np.linspace(50, 200, n_ctrl)     
+            np.linspace(100, 180, n_ctrl),    # RPM ramp up
+            np.linspace(4000, 9000, n_ctrl),  # Airflow ramp up
+            np.linspace(60, 180, n_ctrl)      # Sugar Feed ramp up
         ])
         
         # --- CLOUD FIX: Drastically reduced iterations for Streamlit Servers ---
@@ -845,9 +846,13 @@ class G2PDigitalTwin:
         # ---------------------------------------------------------
         # PILLAR 3: Baseline Factory Simulation
         # ---------------------------------------------------------
+        # ---------------------------------------------------------
+        # PILLAR 3: Baseline Factory Simulation
+        # ---------------------------------------------------------
         print(f"\n[Pillar 3] Running Standard Baseline Simulation for {hours} hours...")
-        base_kLa = self.reactor_sim.calculate_kLa(100, 3000, volume)
-        base_controls = [{'feed_rate': 100, 'feed_concentration': 500, 'kLa': base_kLa, 'O2_saturation': 0.007}] * hours
+        # Make the human baseline safe but very conservative (low yield)
+        base_kLa = self.reactor_sim.calculate_kLa(60, 2000, volume) # Low Agitation, Low Air
+        base_controls = [{'feed_rate': 30, 'feed_concentration': 500, 'kLa': base_kLa, 'O2_saturation': 0.007}] * hours
         
         results['baseline_simulation'] = self.growth_model.simulate(
             y0, t_span, base_controls, t_eval=np.linspace(0, hours, hours)
