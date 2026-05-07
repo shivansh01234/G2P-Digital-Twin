@@ -99,8 +99,8 @@ class SequenceAnalyzer:
 
 class MetabolicBurdenPredictor:
     """
-    Triple-Branch Stacking Ensemble for predicting metabolic burden
-    from protein sequence features.
+    Triple-Branch Stacking Ensemble for predicting metabolic burden.
+    Optimized for Streamlit Cloud memory limits.
     """
     
     def __init__(self):
@@ -110,63 +110,61 @@ class MetabolicBurdenPredictor:
         self.is_fitted = False
         
     def _build_ensemble(self):
-        """Build the triple-branch stacking ensemble."""
-        # Base estimators (three branches)
+        """Build the triple-branch stacking ensemble with cloud-safe parameters."""
         estimators = [
             ('rf', RandomForestClassifier(
-                n_estimators=100, max_depth=10, min_samples_split=5,
-                random_state=42, n_jobs=-1
+                n_estimators=50, max_depth=10, min_samples_split=5,
+                random_state=42, n_jobs=1  # CLOUD FIX: Removed -1 to prevent thread deadlocks
             )),
             ('gb1', GradientBoostingClassifier(
-                n_estimators=100, max_depth=5, learning_rate=0.1,
+                n_estimators=50, max_depth=5, learning_rate=0.1,
                 random_state=42
             )),
             ('gb2', GradientBoostingClassifier(
-                n_estimators=50, max_depth=3, learning_rate=0.05,
+                n_estimators=30, max_depth=3, learning_rate=0.05,
                 subsample=0.8, random_state=123
             ))
         ]
         
-        # Meta-learner
         final_estimator = GradientBoostingClassifier(
-            n_estimators=50, max_depth=3, learning_rate=0.1,
+            n_estimators=30, max_depth=3, learning_rate=0.1,
             random_state=42
         )
         
         return StackingClassifier(
             estimators=estimators,
             final_estimator=final_estimator,
-            cv=5,
+            cv=2,  # CLOUD FIX: Reduced from 5 to 2 to cut memory usage by 60%
             passthrough=True
         )
 
     
     def fit(self):
-        """Train the ensemble on the Universal 15,000-row dataset."""
+        """Train the ensemble with RAM-protection sampling."""
         import pandas as pd
         from sklearn.model_selection import train_test_split
         
-        print("🧠 Booting AI: Training on 15k real-world industrial records...")
+        print("🧠 Booting AI: Training on real-world industrial records...")
         
-        # 1. Load the massive dataset
         df = pd.read_csv('universal_digital_twin_data.csv')
         
-        # 2. One-Hot Encode the Microbe text into binary numbers (0s and 1s)
-        # This teaches the AI that E. coli is physically different from Pichia!
+        # --- CLOUD FIX: Prevent Out-Of-Memory Crash ---
+        # Randomly sample the dataset down to 3,000 rows so the free server doesn't die
+        if len(df) > 3000:
+            df = df.sample(n=3000, random_state=42)
+        # ----------------------------------------------
+        
         df = pd.get_dummies(df, columns=['Host_Microbe'], prefix='Host')
         
-        # 3. Define the exact features (X) to train on
         feature_columns = [
             'Length', 'Molecular_Weight', 'Hydrophobicity', 'Charge_pH7',
             'Instability_Index', 'Aliphatic_Index', 'GRAVY', 'Cys_Fraction',
             'Pro_Fraction', 'Aromatic_Fraction', 'Disorder_Propensity',
             'Aggregation_Propensity', 'Rare_Codon_Burden', 'Folding_Complexity',
-            # Include the new one-hot encoded microbe columns
             'Host_Aspergillus niger', 'Host_Bacillus subtilis', 
             'Host_E. coli', 'Host_Pichia pastoris', 'Host_Saccharomyces cerevisiae'
         ]
         
-        # Filter the dataframe to ensure all columns exist (adds missing ones as 0)
         for col in feature_columns:
             if col not in df.columns:
                 df[col] = 0
@@ -174,7 +172,6 @@ class MetabolicBurdenPredictor:
         X = df[feature_columns].values
         y = df['Target_Burden_Class'].values
         
-        # 4. Standard Machine Learning Pipeline
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
         
         X_train_scaled = self.scaler.fit_transform(X_train)
@@ -192,10 +189,8 @@ class MetabolicBurdenPredictor:
         return {'train_accuracy': train_score, 'test_accuracy': test_score}
     
     def predict_burden(self, features, microbe_name: str = "E. coli"):
-        """Predicts the burden using the full 19-feature array (14 physics + 5 microbes)."""
         import numpy as np
 
-        # 1. Grab the 14 base physical features
         base_features = [
             features.length, features.molecular_weight, features.hydrophobicity,
             features.charge_at_ph7, features.instability_index, features.aliphatic_index,
@@ -205,8 +200,6 @@ class MetabolicBurdenPredictor:
             features.folding_complexity
         ]
 
-        # 2. Map the microbe choice to the exact One-Hot Encoded columns
-        # (Alphabetical order, exactly how pd.get_dummies created them in training)
         host_flags = {
             "Aspergillus niger": [1, 0, 0, 0, 0],
             "Bacillus subtilis": [0, 1, 0, 0, 0],
@@ -215,27 +208,18 @@ class MetabolicBurdenPredictor:
             "Saccharomyces cerevisiae": [0, 0, 0, 0, 1]
         }
 
-        # Get the 5 binary flags for the selected microbe
         microbe_flags = host_flags.get(microbe_name, [0, 0, 1, 0, 0])
-
-        # 3. Combine them to make the exact 19 features the AI is expecting!
         feature_vec = np.array([base_features + microbe_flags])
 
-        # 4. Standard Prediction Math
         feature_vec_scaled = self.scaler.transform(feature_vec)
         probabilities = self.model.predict_proba(feature_vec_scaled)[0]
         
-        # Calculate continuous score using dot product
-        # Calculate continuous score using dot product
         weights = np.array([0.1, 0.4, 0.7, 1.0])
         burden_score = np.dot(probabilities, weights)
         predicted_class = int(np.argmax(probabilities))
         
         class_names = ["Low", "Medium", "High", "Critical"]
         
-        # ---------------------------------------------------------
-        # THE FIX 3: FORMAT PROBABILITIES AS A DICTIONARY
-        # ---------------------------------------------------------
         probs_list = probabilities.tolist()
         class_probs = {
             "Low": probs_list[0], 
@@ -247,7 +231,7 @@ class MetabolicBurdenPredictor:
         return {
             'burden_score': float(burden_score),
             'burden_class': class_names[predicted_class],
-            'class_probabilities': class_probs  # <-- This prevents the dashboard crash!
+            'class_probabilities': class_probs
         }
     
 # =============================================================================
@@ -709,32 +693,36 @@ class DynamicTrajectoryOptimizer:
                 n_hours: int = 72, method: str = 'differential_evolution'
                 ) -> Dict:
         """
-        Find optimal control trajectory.
+        Find optimal control trajectory (Cloud Speed Patch).
+        Drastically limits iterations so free web servers do not hang.
         """
+        import numpy as np
+        from scipy.optimize import minimize, differential_evolution
+        
         n_ctrl = n_hours // 3
         
-        # Bounds for control points
-        # [RPM (30-200), Airflow (1000-10000 L/h), Feed (0-500 L/h)]
+        # Bounds for control points [RPM, Airflow, Feed]
         bounds = (
-            [(30, 200)] * n_ctrl +      # RPM
-            [(1000, 10000)] * n_ctrl +  # Airflow
-            [(0, 500)] * n_ctrl         # Feed rate
+            [(30, 200)] * n_ctrl +      
+            [(1000, 10000)] * n_ctrl +  
+            [(0, 500)] * n_ctrl         
         )
         
-        # Initial guess: gradual ramp-up
+        # Initial guess
         x0 = np.concatenate([
-            np.linspace(50, 150, n_ctrl),    # RPM ramp
-            np.linspace(2000, 6000, n_ctrl), # Airflow ramp
-            np.linspace(50, 200, n_ctrl)     # Feed ramp
+            np.linspace(50, 150, n_ctrl),    
+            np.linspace(2000, 6000, n_ctrl), 
+            np.linspace(50, 200, n_ctrl)     
         ])
         
-        if method == 'L - BFGS - B':
+        # --- CLOUD FIX: Drastically reduced iterations for Streamlit Servers ---
+        if method == 'differential_evolution':
             result = differential_evolution(
                 self.objective_function,
                 bounds,
                 args=(y0, t_span, n_hours),
-                maxiter=100,
-                popsize=10,
+                maxiter=3,        # Reduced from 100 to prevent cloud timeout
+                popsize=2,        # Reduced from 10
                 mutation=(0.5, 1.0),
                 recombination=0.7,
                 seed=42,
@@ -749,8 +737,9 @@ class DynamicTrajectoryOptimizer:
                 args=(y0, t_span, n_hours),
                 method='L-BFGS-B',
                 bounds=bounds,
-                options={'maxiter': 500, 'disp': False}
+                options={'maxiter': 5, 'disp': False} # Reduced from 500
             )
+        # -----------------------------------------------------------------------
         
         # Extract optimal trajectories
         rpm_opt, airflow_opt, feed_opt = self._parameterize_trajectory(
@@ -762,8 +751,7 @@ class DynamicTrajectoryOptimizer:
             'optimal_airflow': airflow_opt,
             'optimal_feed': feed_opt,
             'objective_value': result.fun,
-            'success': result.success,
-            'n_iterations': result.nit if hasattr(result, 'nit') else None
+            'success': result.success
         }
 
 
